@@ -11,9 +11,9 @@ type AllRequired<T> = Required<{
 type ConfigType = AllRequired<
   Freeze<{
     github: {
-      pat: {
-        main: string;
-      };
+      pat: { main: string };
+      owner: { main: string };
+      repo: { main: string };
     };
   }>
 >;
@@ -21,6 +21,8 @@ type ConfigType = AllRequired<
 const initialConfig: ConfigType = {
   github: {
     pat: { main: '' },
+    owner: { main: '' },
+    repo: { main: '' },
   },
 };
 
@@ -39,7 +41,7 @@ if ((await Bun.file(filePath).exists()) === false) {
   await Bun.write(filePath, YAML.stringify(initialConfig));
 }
 
-const config: ConfigType = await (async () => {
+const configAuth: ConfigType = await (async () => {
   const rawFileData: ConfigType = YAML.parse(await Bun.file(filePath).text()) as ConfigType;
   const mergedConfig = deepmerge(initialConfig, rawFileData, {
     arrayMerge: (_destinationArray, sourceArray) => sourceArray,
@@ -50,4 +52,4 @@ const config: ConfigType = await (async () => {
   return deobfuscator(mergedConfig);
 })();
 
-export default config;
+export default configAuth;

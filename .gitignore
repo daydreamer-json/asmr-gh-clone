@@ -1,4 +1,6 @@
 .antigravitycli/
+config/
+memo/
 
 # dependencies (bun install)
 node_modules

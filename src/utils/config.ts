@@ -32,6 +32,9 @@ type ConfigType = AllRequired<
         curl: string;
         ios: string;
       };
+      secChUa: {
+        chrome: string;
+      };
       timeout: number; // Network timeout
       retryCount: number; // Number of retries for access failure
     };
@@ -78,6 +81,9 @@ const initialConfig: ConfigType = {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
       curl: 'curl/8.4.0',
       ios: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+    },
+    secChUa: {
+      chrome: '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
     },
     timeout: 20000,
     retryCount: 5,

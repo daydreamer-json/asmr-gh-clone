@@ -9,6 +9,9 @@ import type { FilesystemEntryTransformed } from '../types/api/audioProviderFiles
 import argvUtils from './argv.js';
 import appConfig from './config.js';
 import math from './math.js';
+import rateMeterModule from './rateMeter';
+
+const { RateMeter } = rateMeterModule;
 
 export interface DownloadResult {
   uuid: string;
@@ -30,18 +33,12 @@ export async function downloadFiles(files: FilesystemEntryTransformed[]): Promis
   const argv = argvUtils.getArgv();
   const outputDir: string = argv['output-dir'];
 
-  // Create directory if not exists
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-  // Check disk space
-  const totalSize = files.reduce((acc, f) => acc + f.size, 0);
+  const totalSize = math.arrayTotal(files.map((e) => e.size));
   const diskSpace = await checkDiskSpace(outputDir);
   if (diskSpace.free < totalSize) {
-    throw new Error(
-      `Insufficient disk space on ${outputDir}. Required: ${totalSize} bytes, Available: ${diskSpace.free} bytes.`,
-    );
+    throw new Error(`Insufficient disk space on ${outputDir}. Req: ${totalSize} bytes, Free: ${diskSpace.free} bytes`);
   }
 
   const queue = new PQueue({ concurrency: appConfig.threadCount.network });
@@ -50,12 +47,17 @@ export async function downloadFiles(files: FilesystemEntryTransformed[]): Promis
   let completedCount = 0;
   let downloadedBytes = 0;
   const totalCount = files.length;
+  const downloadMeter = new RateMeter(1000, true);
 
   const updateProgress = () => {
     const percent = totalSize > 0 ? ((downloadedBytes / totalSize) * 100).toFixed(1) : '0.0';
-    const downloadedStr = math.formatFileSize(downloadedBytes, FORMAT_SIZE_OPTS);
-    const totalStr = math.formatFileSize(totalSize, FORMAT_SIZE_OPTS);
-    spinner.text = `Downloading: ${completedCount}/${totalCount} files (${percent}%) - ${downloadedStr} / ${totalStr}`;
+    const downloadedStr = math.formatFileSize(downloadedBytes, { ...FORMAT_SIZE_OPTS, unit: 'M' });
+    const totalStr = math.formatFileSize(totalSize, { ...FORMAT_SIZE_OPTS, unit: 'M' });
+
+    const speedBytesPerSec = downloadMeter.getRate();
+    const speedStr = `${math.formatFileSize(speedBytesPerSec, { ...FORMAT_SIZE_OPTS, unit: 'M' })}/s`;
+
+    spinner.text = `Downloading: ${completedCount}/${totalCount} files (${percent}%) - ${downloadedStr} / ${totalStr} - ${speedStr}`;
   };
 
   updateProgress();
@@ -92,6 +94,7 @@ export async function downloadFiles(files: FilesystemEntryTransformed[]): Promis
           hash.update(value);
           writer.write(value);
           downloadedBytes += value.length;
+          downloadMeter.increment(value.length);
           updateProgress();
         }
       } finally {
