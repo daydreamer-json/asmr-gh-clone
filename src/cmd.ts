@@ -11,8 +11,8 @@ import logger from './utils/logger.js';
 
 if (configEmbed.VERSION_NUMBER === null) throw new Error('Embed VERSION_NUMBER is null');
 
-function wrapHandler(handler: (argv: any) => Promise<void>) {
-  return async (argv: any) => {
+function wrapHandler<T>(handler: (argv: T) => Promise<void>) {
+  return async (argv: T) => {
     try {
       await handler(argv);
       await exitUtils.exit(0);

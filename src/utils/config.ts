@@ -40,7 +40,8 @@ type ConfigType = AllRequired<
     };
     threadCount: {
       // Upper limit on the number of threads for parallel processing
-      network: number; // network access
+      networkDownload: number; // network access
+      networkUpload: number; // network access
       hashing: number; // file hashing
     };
     logger: {
@@ -88,7 +89,7 @@ const initialConfig: ConfigType = {
     timeout: 20000,
     retryCount: 5,
   },
-  threadCount: { network: 8, hashing: 8 },
+  threadCount: { networkDownload: 8, networkUpload: 4, hashing: 8 },
   logger: {
     logLevel: 0,
     useCustomLayout: true,

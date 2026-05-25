@@ -1,9 +1,8 @@
 import readline from 'node:readline';
-import appConfig from './config.js';
 
 async function pressAnyKeyToExit(errorCode: number): Promise<void> {
   if (errorCode !== 0) console.error('An error occurred');
-  if (!process.stdin.isTTY || (appConfig.cli.autoExit && errorCode === 0)) {
+  if (!process.stdin.isTTY) {
     console.log(`Exiting with code ${errorCode} ...`);
     process.exit(errorCode);
   }

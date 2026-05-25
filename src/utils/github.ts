@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { Octokit } from '@octokit/rest';
 import logger from './logger.js';
 
@@ -7,21 +8,29 @@ async function uploadAsset(
   repo: string,
   tag: string,
   targetFileName: string,
-  buffer: Uint8Array,
+  filePath: string,
 ) {
   const release = await getReleaseInfo(client, owner, repo, tag);
   if (!release) throw new Error('GH release not found');
   const releaseId = release.id;
 
-  logger.info(`Mirror archive: Uploading to ${tag}, ${targetFileName} ...`);
-  await client.rest.repos.uploadReleaseAsset({
+  const stats = fs.statSync(filePath);
+  const fileSize = stats.size;
+  const fileStream = fs.createReadStream(filePath);
+
+  logger.info(`Mirror archive: Uploading to ${tag}, ${targetFileName} (${fileSize} bytes) ...`);
+  const response = await client.rest.repos.uploadReleaseAsset({
     owner,
     repo,
     release_id: releaseId,
     name: targetFileName,
-    data: buffer as any,
+    data: fileStream as unknown as string, // Octokit internal handles ReadStream via string/buffer types
+    headers: {
+      'content-type': 'application/octet-stream',
+      'content-length': fileSize,
+    },
   });
-  return true;
+  return response.data.browser_download_url;
 }
 
 async function getReleaseInfo(client: Octokit, owner: string, repo: string, tag: string) {
