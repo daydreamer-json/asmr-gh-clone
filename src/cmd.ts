@@ -27,8 +27,8 @@ async function parseCommand() {
   const yargsInstance = yargs(hideBin(process.argv));
   await yargsInstance
     .command(
-      ['test'],
-      'Test command',
+      ['archive'],
+      'Download specified works from input.json and Upload to mirror',
       (yargs) => {
         yargs.options({
           'output-db-dir': {
@@ -47,7 +47,40 @@ async function parseCommand() {
           },
         });
       },
-      wrapHandler(cmds.test),
+      wrapHandler(cmds.archive),
+    )
+    .command(
+      ['filterInputWrite <date-start> <date-end>'],
+      'Filter works and write input.json',
+      (yargs) => {
+        yargs
+          .positional('date-start', {
+            type: 'string',
+            demandOption: true,
+          })
+          .positional('date-end', {
+            type: 'string',
+            demandOption: true,
+          })
+          .options({});
+      },
+      wrapHandler(cmds.filterInputWrite),
+    )
+    .command(
+      ['syncDb'],
+      'Download DB if remote is newer',
+      (yargs) => {
+        yargs.options({
+          'output-db-dir': {
+            // alias: ['o'],
+            desc: 'Output root directory',
+            default: path.resolve('output_db'),
+            normalize: true,
+            type: 'string',
+          },
+        });
+      },
+      wrapHandler(cmds.syncDb),
     )
     .options({
       'log-level': {

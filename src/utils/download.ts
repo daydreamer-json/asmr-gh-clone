@@ -10,6 +10,7 @@ import PQueue from 'p-queue';
 import * as uuid from 'uuid';
 import type { RspWorkInfoSanitized } from '../types/api/audioProvider.js';
 import type { FilesystemEntryTransformed } from '../types/api/audioProviderFiles.js';
+import type { DbFile, DbFileChunk, DbWork } from '../types/db.js';
 import argvUtils from './argv.js';
 import appConfig from './config.js';
 import logger from './logger.js';
@@ -105,7 +106,7 @@ interface FileStatus {
   uuid: string;
   hash: string;
   path: string[];
-  chunks: { uuid: string; offset: number; size: number }[];
+  chunks: DbFileChunk[];
   associatedWorkId: number;
   isNew: boolean;
 }
@@ -261,8 +262,8 @@ export async function getRegisteredWorkIds(outputDbDir: string): Promise<Set<num
   return registeredIds;
 }
 
-export async function getRegisteredFiles(outputDbDir: string): Promise<Map<string, { hash: string; chunks: any[] }>> {
-  const registeredFiles = new Map<string, { hash: string; chunks: any[] }>();
+export async function getRegisteredFiles(outputDbDir: string): Promise<Map<string, DbFile>> {
+  const registeredFiles = new Map<string, DbFile>();
   const filesPath = path.join(outputDbDir, 'files.jsonl');
   if (!fs.existsSync(filesPath)) return registeredFiles;
 
@@ -275,7 +276,7 @@ export async function getRegisteredFiles(outputDbDir: string): Promise<Map<strin
   for await (const line of rl) {
     if (line.trim() === '') continue;
     try {
-      const data = JSON.parse(line);
+      const data = JSON.parse(line) as DbFile;
       if (data && typeof data.hash === 'string') {
         registeredFiles.set(data.hash, data);
       }
@@ -496,8 +497,8 @@ export async function processWorks(
   };
 
   const checkAndCommitCompletedWorks = async () => {
-    const completedWorks = [];
-    const completedFiles = [];
+    const completedWorks: DbWork[] = [];
+    const completedFiles: DbFile[] = [];
 
     for (const [workId, work] of activeWorks.entries()) {
       let workCompleted = true;

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Octokit } from '@octokit/rest';
 import PQueue from 'p-queue';
+import type { DbWork, DbFile, DbChunk } from '../types/db.js';
 import configAuth from './configAuth.js';
 import githubUtils from './github.js';
 import logger from './logger.js';
@@ -101,7 +102,7 @@ async function uploadChunkFile(
   return url;
 }
 
-async function saveMetadata(outputDbDir: string, works: any[], files: any[], chunks: any[]): Promise<void> {
+async function saveMetadata(outputDbDir: string, works: DbWork[], files: DbFile[], chunks: DbChunk[]): Promise<void> {
   if (!fs.existsSync(outputDbDir)) {
     fs.mkdirSync(outputDbDir, { recursive: true });
   }
