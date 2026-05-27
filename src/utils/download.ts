@@ -19,6 +19,67 @@ import uploadUtils from './upload.js';
 
 const { RateMeter } = rateMeterModule;
 
+export interface ProgressReporter {
+  text: string;
+  succeed(text?: string): any;
+  fail(text?: string): any;
+}
+
+class LogProgressReporter implements ProgressReporter {
+  private _text: string = '';
+  private lastLogTime: number = 0;
+  private readonly logIntervalMs: number = 2000;
+
+  constructor(initialText: string) {
+    this._text = initialText;
+    this.log(initialText);
+  }
+
+  get text(): string {
+    return this._text;
+  }
+
+  set text(value: string) {
+    this._text = value;
+    const now = Date.now();
+    if (now - this.lastLogTime >= this.logIntervalMs) {
+      this.log(value);
+    }
+  }
+
+  private log(message: string) {
+    logger.info(message);
+    this.lastLogTime = Date.now();
+  }
+
+  succeed(text?: string): any {
+    if (text !== undefined) {
+      this._text = text;
+    }
+    logger.info(`[SUCCESS] ${this._text}`);
+    return this;
+  }
+
+  fail(text?: string): any {
+    if (text !== undefined) {
+      this._text = text;
+    }
+    logger.error(`[FAIL] ${this._text}`);
+    return this;
+  }
+}
+
+function createProgressReporter(initialText: string): ProgressReporter {
+  const argv = argvUtils.getArgv();
+  const noSpinner = argv['spinner'] === false;
+
+  if (noSpinner) {
+    return new LogProgressReporter(initialText);
+  } else {
+    return ora({ text: initialText, spinner: 'material' }).start();
+  }
+}
+
 export interface DownloadResult {
   uuid: string;
   hash: string;
@@ -85,7 +146,7 @@ export async function downloadFiles(files: FilesystemEntryTransformed[]): Promis
   }
 
   const queue = new PQueue({ concurrency: appConfig.threadCount.networkDownload });
-  const spinner = ora({ text: 'Starting download...', spinner: 'material' }).start();
+  const spinner = createProgressReporter('Starting download...');
 
   let completedCount = 0;
   let downloadedBytes = 0;
@@ -302,7 +363,7 @@ export async function processWorks(
   let uploadCompletedCount = 0;
   let uploadTotalCount = 0;
 
-  const spinner = ora({ text: 'Starting processing...', spinner: 'material' }).start();
+  const spinner = createProgressReporter('Starting processing...');
 
   let completedCount = 0;
   let downloadedBytes = 0;
@@ -394,7 +455,6 @@ export async function processWorks(
   for (let i = 0; i < Math.min(WINDOW_SIZE, tasks.length); i++) {
     startDownloadTask(i);
   }
-
 
   const chunksUploaded: { uuid: string; url: string }[] = [];
   let currentChunk: ChunkInfo | null = null;
@@ -515,7 +575,7 @@ export async function processWorks(
         // serialize metadata updates and work commits in metaQueue
         await metaQueue.add(async () => {
           await uploadUtils.saveMetadata(outputDbDir, [], [], [{ uuid: chunk.uuid, url }]);
-          
+
           try {
             if (fs.existsSync(chunk.filePath)) {
               fs.unlinkSync(chunk.filePath);
@@ -533,13 +593,13 @@ export async function processWorks(
       } catch (error: any) {
         logger.error(`Upload failed for chunk ${chunk.uuid}: ${error.message || error}`);
         uploadErrors.push(error instanceof Error ? error : new Error(String(error)));
-        
+
         try {
           if (fs.existsSync(chunk.filePath)) {
             fs.unlinkSync(chunk.filePath);
           }
         } catch {}
-        
+
         updateProgress();
       }
     });

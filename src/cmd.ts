@@ -62,6 +62,11 @@ async function parseCommand() {
           }
         },
       },
+      spinner: {
+        desc: 'Enable or disable interactive progress spinner',
+        default: true,
+        type: 'boolean',
+      },
     })
     .middleware(async (argv) => {
       argvUtils.setArgv(argv);
