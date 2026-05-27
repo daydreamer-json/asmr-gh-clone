@@ -82,6 +82,22 @@ async function parseCommand() {
       },
       wrapHandler(cmds.syncDb),
     )
+    .command(
+      ['test'],
+      'Test command',
+      (yargs) => {
+        yargs.options({
+          'output-db-dir': {
+            // alias: ['o'],
+            desc: 'Output root directory',
+            default: path.resolve('output_db'),
+            normalize: true,
+            type: 'string',
+          },
+        });
+      },
+      wrapHandler(cmds.test),
+    )
     .options({
       'log-level': {
         desc: 'Set log level (' + TypesLogLevels.LOG_LEVELS_NUM.join(', ') + ')',

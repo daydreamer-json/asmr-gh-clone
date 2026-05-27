@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline';
 import { Octokit } from '@octokit/rest';
 import checkDiskSpace from 'check-disk-space';
 import ky from 'ky';
@@ -13,6 +12,7 @@ import type { FilesystemEntryTransformed } from '../types/api/audioProviderFiles
 import type { DbFile, DbFileChunk, DbWork } from '../types/db.js';
 import argvUtils from './argv.js';
 import appConfig from './config.js';
+import { readDbFile } from './db.js';
 import logger from './logger.js';
 import math from './math.js';
 import rateMeterModule from './rateMeter.js';
@@ -236,26 +236,15 @@ export async function downloadFiles(files: FilesystemEntryTransformed[]): Promis
 
 export async function getRegisteredWorkIds(outputDbDir: string): Promise<Set<number>> {
   const registeredIds = new Set<number>();
-  const worksPath = path.join(outputDbDir, 'works.jsonl');
+  const worksPath = path.join(outputDbDir, 'works.msgpack.zst');
   if (!fs.existsSync(worksPath)) {
     return registeredIds;
   }
 
-  const fileStream = fs.createReadStream(worksPath);
-  const rl = readline.createInterface({
-    input: fileStream,
-    crlfDelay: Infinity,
-  });
-
-  for await (const line of rl) {
-    if (line.trim() === '') continue;
-    try {
-      const data = JSON.parse(line);
-      if (data && typeof data.id === 'number') {
-        registeredIds.add(data.id);
-      }
-    } catch (e) {
-      // Ignore parse error on partial lines
+  const works = readDbFile<DbWork>(worksPath);
+  for (const work of works) {
+    if (work && typeof work.id === 'number') {
+      registeredIds.add(work.id);
     }
   }
 
@@ -264,23 +253,14 @@ export async function getRegisteredWorkIds(outputDbDir: string): Promise<Set<num
 
 export async function getRegisteredFiles(outputDbDir: string): Promise<Map<string, DbFile>> {
   const registeredFiles = new Map<string, DbFile>();
-  const filesPath = path.join(outputDbDir, 'files.jsonl');
+  const filesPath = path.join(outputDbDir, 'files.msgpack.zst');
   if (!fs.existsSync(filesPath)) return registeredFiles;
 
-  const fileStream = fs.createReadStream(filesPath);
-  const rl = readline.createInterface({
-    input: fileStream,
-    crlfDelay: Infinity,
-  });
-
-  for await (const line of rl) {
-    if (line.trim() === '') continue;
-    try {
-      const data = JSON.parse(line) as DbFile;
-      if (data && typeof data.hash === 'string') {
-        registeredFiles.set(data.hash, data);
-      }
-    } catch (e) {}
+  const files = readDbFile<DbFile>(filesPath);
+  for (const file of files) {
+    if (file && typeof file.hash === 'string') {
+      registeredFiles.set(file.hash, file);
+    }
   }
   return registeredFiles;
 }
