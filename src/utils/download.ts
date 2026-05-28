@@ -134,6 +134,84 @@ const FORMAT_SIZE_OPTS = {
   unit: null,
 };
 
+async function downloadCore(
+  file: FilesystemEntryTransformed,
+  destPath: string,
+  onProgress: (delta: number) => void,
+): Promise<DownloadResult> {
+  const response = await ky.get(file.mediaDownloadUrl, {
+    headers: {
+      'User-Agent': appConfig.network.userAgent.chromeWindows,
+      Referer: appConfig.network.api.audioProvider.referer,
+    },
+    timeout: appConfig.network.timeout,
+    retry: { limit: appConfig.network.retryCount },
+  });
+
+  if (!response.body) {
+    throw new Error(`Failed to get response body for file: ${file.uuid}`);
+  }
+
+  const reader = response.body.getReader();
+  const writer = fs.createWriteStream(destPath);
+  const hash = crypto.createHash('sha256');
+
+  const fileMeter = new RateMeter(appConfig.network.stallTimeoutSeconds * 1000, true);
+  const startTime = Date.now();
+  let lastActiveTime = startTime;
+  let isStalled = false;
+
+  const monitorInterval = setInterval(() => {
+    const now = Date.now();
+    const elapsedSinceLastActive = now - lastActiveTime;
+    const currentRate = fileMeter.getRate();
+
+    if (
+      elapsedSinceLastActive >= appConfig.network.stallTimeoutSeconds * 1000 ||
+      (now - startTime >= appConfig.network.stallTimeoutSeconds * 1000 &&
+        currentRate < appConfig.network.stallThresholdBytesPerSec)
+    ) {
+      isStalled = true;
+      reader.cancel().catch(() => {});
+      clearInterval(monitorInterval);
+    }
+  }, 1000);
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (isStalled) {
+        throw new Error('Download stalled');
+      }
+      lastActiveTime = Date.now();
+      fileMeter.increment(value.length);
+      hash.update(value);
+      writer.write(value);
+      onProgress(value.length);
+    }
+  } finally {
+    clearInterval(monitorInterval);
+    writer.end();
+    await new Promise<void>((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
+  }
+
+  if (isStalled) {
+    throw new Error('Download stalled');
+  }
+
+  const sha256Hex = hash.digest('hex');
+  return {
+    uuid: file.uuid,
+    hash: sha256Hex,
+    size: file.size,
+    filePath: destPath,
+  };
+}
+
 export async function downloadFiles(files: FilesystemEntryTransformed[]): Promise<DownloadResult[]> {
   const argv = argvUtils.getArgv();
   const outputDir: string = argv['output-dir'];
@@ -172,54 +250,38 @@ export async function downloadFiles(files: FilesystemEntryTransformed[]): Promis
   const downloadTasks = files.map((file, index) => {
     return queue.add(async () => {
       const destPath = path.join(outputDir, `${file.uuid}.bin`);
-
-      const response = await ky.get(file.mediaDownloadUrl, {
-        headers: {
-          'User-Agent': appConfig.network.userAgent.chromeWindows,
-          Referer: appConfig.network.api.audioProvider.referer,
-        },
-        timeout: appConfig.network.timeout,
-        retry: { limit: appConfig.network.retryCount },
-      });
-
-      if (!response.body) {
-        throw new Error(`Failed to get response body for file: ${file.uuid}`);
-      }
-
-      const reader = response.body.getReader();
-      const writer = fs.createWriteStream(destPath);
-      const hash = crypto.createHash('sha256');
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-          hash.update(value);
-          writer.write(value);
-          downloadedBytes += value.length;
-          downloadMeter.increment(value.length);
+      let attempt = 0;
+      while (true) {
+        let downloadedInThisAttempt = 0;
+        try {
+          const res = await downloadCore(file, destPath, (delta) => {
+            downloadedInThisAttempt += delta;
+            downloadedBytes += delta;
+            downloadMeter.increment(delta);
+            updateProgress();
+          });
+          completedCount += 1;
           updateProgress();
+          results[index] = res;
+          break;
+        } catch (error: any) {
+          if (error.message === 'Download stalled' && attempt < appConfig.network.stallRetryLimit) {
+            attempt++;
+            logger.warn(
+              `Download stalled for ${file.uuid}. Retrying (${attempt}/${appConfig.network.stallRetryLimit})...`,
+            );
+            downloadedBytes -= downloadedInThisAttempt;
+            updateProgress();
+            if (fs.existsSync(destPath)) {
+              try {
+                fs.unlinkSync(destPath);
+              } catch {}
+            }
+            continue;
+          }
+          throw error;
         }
-      } finally {
-        writer.end();
-        await new Promise<void>((resolve, reject) => {
-          writer.on('finish', resolve);
-          writer.on('error', reject);
-        });
       }
-
-      const sha256Hex = hash.digest('hex');
-      completedCount += 1;
-      updateProgress();
-
-      results[index] = {
-        uuid: file.uuid,
-        hash: sha256Hex,
-        size: file.size,
-        filePath: destPath,
-      };
     });
   });
 
@@ -372,47 +434,32 @@ export async function processWorks(
     destPath: string,
     onProgress: (bytes: number) => void,
   ): Promise<DownloadResult> => {
-    const response = await ky.get(file.mediaDownloadUrl, {
-      headers: {
-        'User-Agent': appConfig.network.userAgent.chromeWindows,
-        Referer: appConfig.network.api.audioProvider.referer,
-      },
-      timeout: appConfig.network.timeout,
-      retry: { limit: appConfig.network.retryCount },
-    });
-
-    if (!response.body) {
-      throw new Error(`Failed to get response body for file: ${file.uuid}`);
-    }
-
-    const reader = response.body.getReader();
-    const writer = fs.createWriteStream(destPath);
-    const hash = crypto.createHash('sha256');
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        hash.update(value);
-        writer.write(value);
-        onProgress(value.length);
-        downloadMeter.increment(value.length);
+    let attempt = 0;
+    while (true) {
+      let downloadedInThisAttempt = 0;
+      try {
+        const res = await downloadCore(file, destPath, (delta) => {
+          downloadedInThisAttempt += delta;
+          onProgress(delta);
+        });
+        return res;
+      } catch (error: any) {
+        if (error.message === 'Download stalled' && attempt < appConfig.network.stallRetryLimit) {
+          attempt++;
+          logger.warn(
+            `Download stalled for ${file.uuid}. Retrying (${attempt}/${appConfig.network.stallRetryLimit})...`,
+          );
+          onProgress(-downloadedInThisAttempt);
+          if (fs.existsSync(destPath)) {
+            try {
+              fs.unlinkSync(destPath);
+            } catch {}
+          }
+          continue;
+        }
+        throw error;
       }
-    } finally {
-      writer.end();
-      await new Promise<void>((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
     }
-
-    const sha256Hex = hash.digest('hex');
-    return {
-      uuid: file.uuid,
-      hash: sha256Hex,
-      size: file.size,
-      filePath: destPath,
-    };
   };
 
   const WINDOW_SIZE = Math.max(Math.floor(appConfig.threadCount.networkDownload * 1.5), 8);
@@ -424,6 +471,9 @@ export async function processWorks(
     task.downloadPromise = queue.add(async () => {
       const res = await downloadSingleFile(task.file, task.destPath, (bytes) => {
         downloadedBytes += bytes;
+        if (bytes > 0) {
+          downloadMeter.increment(bytes);
+        }
         updateProgress();
       });
       completedCount += 1;
