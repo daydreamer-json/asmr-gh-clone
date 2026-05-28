@@ -12,7 +12,15 @@ export default async () => {
 
   const apiDb = await (async () => {
     logger.info('Fetching all works from API ...');
-    const queue = new PQueue({ concurrency: config.threadCount.networkMetadata });
+    const queue = new PQueue({
+      concurrency: config.threadCount.networkMetadata,
+      ...(config.rateLimit.metadata.interval > 0
+        ? {
+            interval: config.rateLimit.metadata.interval,
+            intervalCap: config.rateLimit.metadata.intervalCap,
+          }
+        : {}),
+    });
     const pageSize = 999;
 
     const initRsp = await apClient.works.list('create_date', 'asc', 1, pageSize);

@@ -57,7 +57,15 @@ export default async () => {
   const metadataArray: WorkMetadata[] = [];
   logger.debug('Fetching metadata ...');
 
-  const queue = new PQueue({ concurrency: config.threadCount.networkMetadata });
+  const queue = new PQueue({
+    concurrency: config.threadCount.networkMetadata,
+    ...(config.rateLimit.metadata.interval > 0
+      ? {
+          interval: config.rateLimit.metadata.interval,
+          intervalCap: config.rateLimit.metadata.intervalCap,
+        }
+      : {}),
+  });
   const metadataTasks = idsToProcess.map((id) =>
     queue.add(async () => {
       // logger.trace('Fetching metadata: ' + id);

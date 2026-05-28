@@ -60,6 +60,12 @@ type ConfigType = AllRequired<
         clearOnComplete: boolean;
       };
     };
+    rateLimit: {
+      metadata: {
+        interval: number;
+        intervalCap: number;
+      };
+    };
   }>
 >;
 
@@ -91,6 +97,12 @@ const initialConfig: ConfigType = {
     retryCount: 5,
   },
   threadCount: { networkDownload: 8, networkUpload: 4, networkMetadata: 8, hashing: 8 },
+  rateLimit: {
+    metadata: {
+      interval: 1000,
+      intervalCap: 5,
+    },
+  },
   logger: {
     logLevel: 0,
     useCustomLayout: true,
