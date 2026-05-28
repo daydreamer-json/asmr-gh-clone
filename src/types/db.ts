@@ -25,7 +25,7 @@ export interface DbWorkFile {
 export interface DbWork {
   id: number;
   workInfo: RspWorkInfoSanitized;
-  dlsiteInfo: Record<string, unknown>;
+  dlsiteInfo: Record<string, unknown> | null;
   coverImage: {
     main: boolean;
     thumb: boolean;

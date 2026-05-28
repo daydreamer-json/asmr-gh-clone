@@ -70,7 +70,14 @@ export default async () => {
     queue.add(async () => {
       // logger.trace('Fetching metadata: ' + id);
       const workInfo = await apClient.work.info(id);
-      const dlsiteInfo = (await dsClient.work.info(stringUtils.rjIdNumToStr(id))) as Record<string, unknown>;
+      let dlsiteInfo: Record<string, unknown> | null = null;
+      try {
+        dlsiteInfo = (await dsClient.work.info(stringUtils.rjIdNumToStr(id))) as Record<string, unknown>;
+      } catch (error) {
+        logger.warn(
+          `Failed to fetch DLsite metadata for ${id}. It might have been deleted from DLsite. Error: ${error}`,
+        );
+      }
       const [main, thumb, icon] = await Promise.all([
         apClient.work.media.coverImage(id, 'main'),
         apClient.work.media.coverImage(id, 'thumb'),

@@ -114,7 +114,7 @@ interface FileStatus {
 export interface WorkMetadata {
   id: number;
   workInfo: RspWorkInfoSanitized;
-  dlsiteInfo: Record<string, unknown>;
+  dlsiteInfo: Record<string, unknown> | null;
   coverImage: { main: boolean; thumb: boolean; icon: boolean };
   files: FilesystemEntryTransformed[];
 }
