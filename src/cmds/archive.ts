@@ -88,7 +88,18 @@ export default async () => {
         thumb: thumb !== null,
         icon: icon !== null,
       };
-      const apFileEntry = await apClient.work.fileEntry(id);
+
+      let apFileEntry;
+      try {
+        apFileEntry = await apClient.work.fileEntry(id);
+      } catch (error: any) {
+        if (error.response?.status === 404) {
+          logger.warn(`Skipping work ${id}: fileEntry returned 404.`);
+          return undefined;
+        }
+        throw error;
+      }
+
       const rsp = { id, workInfo, dlsiteInfo, coverImage, files: apFileEntry.transformed };
       logger.trace(
         `Fetched: ${rsp.workInfo.release}, ${rsp.workInfo.create_date}, ${math.formatFileSize(math.arrayTotal(rsp.files.map((e) => e.size)), { ...FORMAT_SIZE_OPTS, unit: 'M' })}, ${id}`,
