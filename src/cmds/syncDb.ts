@@ -1,11 +1,10 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import ky from 'ky';
 import * as MsgPack from 'msgpackr';
 import type { DbChunk, DbFile, DbWork } from '../types/db.js';
 import argvUtils from '../utils/argv.js';
 import configAuth from '../utils/configAuth.js';
-import { readDbFile, writeDbFile } from '../utils/db.js';
+import { readDbFile } from '../utils/db.js';
 import logger from '../utils/logger';
 import math from '../utils/math.js';
 

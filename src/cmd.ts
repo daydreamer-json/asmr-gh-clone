@@ -83,6 +83,33 @@ async function parseCommand() {
       wrapHandler(cmds.syncDb),
     )
     .command(
+      ['optimizeChunk'],
+      'Optimize chunk binary file',
+      (yargs) => {
+        yargs.options({
+          'output-db-dir': {
+            // alias: ['o'],
+            desc: 'Output root directory',
+            default: path.resolve('output_db'),
+            normalize: true,
+            type: 'string',
+          },
+          'output-dir': {
+            desc: 'Output root directory',
+            default: path.resolve('output'),
+            normalize: true,
+            type: 'string',
+          },
+          'dry-run': {
+            desc: 'Perform a trial run with no changes made',
+            default: false,
+            type: 'boolean',
+          },
+        });
+      },
+      wrapHandler(cmds.optimizeChunk),
+    )
+    .command(
       ['test'],
       'Test command',
       (yargs) => {
