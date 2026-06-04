@@ -23,7 +23,46 @@ async function uploadOrReplaceAsset(
     throw new Error(`GitHub release with tag "${tag}" not found.`);
   }
 
-  const existingAsset = release.assets.find((a: any) => a.name === targetFileName);
+  const tempFileName = `temp-${targetFileName}`;
+
+  const existingTempAsset = release.assets.find((a: any) => a.name === tempFileName);
+  if (existingTempAsset !== undefined) {
+    logger.info(
+      `Deleting existing temp asset "${tempFileName}" (ID: ${existingTempAsset.id}) from release "${tag}"...`,
+    );
+    try {
+      await client.rest.repos.deleteReleaseAsset({
+        owner,
+        repo,
+        asset_id: existingTempAsset.id,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } catch (e: any) {
+      logger.warn(`Failed to delete existing temp asset "${tempFileName}": ${e.message || e}`);
+    }
+  }
+
+  logger.info(`Uploading DB asset "${targetFileName}" as temp asset "${tempFileName}" to release "${tag}"...`);
+  const tempUrl = await githubUtils.uploadAsset(client, owner, repo, tag, tempFileName, filePath);
+
+  let updatedRelease: any = null;
+  let uploadedTempAsset: any = undefined;
+  for (let i = 0; i < 3; i++) {
+    updatedRelease = await githubUtils.getReleaseInfo(client, owner, repo, tag);
+    if (updatedRelease) {
+      uploadedTempAsset = updatedRelease.assets.find((a: any) => a.name === tempFileName);
+      if (uploadedTempAsset) {
+        break;
+      }
+    }
+    logger.warn(`Temp asset "${tempFileName}" not found in release assets list, retrying in 2 seconds...`);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  if (!uploadedTempAsset || !updatedRelease) {
+    throw new Error(`Uploaded temp asset "${tempFileName}" not found in release assets list after retries.`);
+  }
+
+  const existingAsset = updatedRelease.assets.find((a: any) => a.name === targetFileName);
   if (existingAsset !== undefined) {
     logger.info(`Deleting existing asset "${targetFileName}" (ID: ${existingAsset.id}) from release "${tag}"...`);
     try {
@@ -38,9 +77,16 @@ async function uploadOrReplaceAsset(
     }
   }
 
-  logger.info(`Uploading DB asset "${targetFileName}" to release "${tag}"...`);
-  const response = await githubUtils.uploadAsset(client, owner, repo, tag, targetFileName, filePath);
-  return response;
+  logger.info(`Renaming temp asset "${tempFileName}" to "${targetFileName}"...`);
+  await client.rest.repos.updateReleaseAsset({
+    owner,
+    repo,
+    asset_id: uploadedTempAsset.id,
+    name: targetFileName,
+  });
+
+  const finalUrl = tempUrl.replace(tempFileName, targetFileName);
+  return finalUrl;
 }
 
 async function getOrCreateUploadTag(client: Octokit, owner: string, repo: string): Promise<string> {

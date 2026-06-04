@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Octokit } from '@octokit/rest';
 import checkDiskSpace from 'check-disk-space';
 import ky from 'ky';
+import { DateTime } from 'luxon';
 import ora from 'ora';
 import PQueue from 'p-queue';
 import * as uuid from 'uuid';
@@ -562,6 +563,7 @@ export async function processWorks(
             hash: f.hash,
             chunks: f.chunks,
           })),
+          archivedAt: DateTime.utc().toISO() ?? undefined,
         });
 
         for (const f of completedFilesForThisWork) {

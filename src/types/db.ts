@@ -32,4 +32,5 @@ export interface DbWork {
     icon: boolean;
   };
   files: DbWorkFile[];
+  archivedAt?: string;
 }
