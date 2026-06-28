@@ -147,7 +147,7 @@ function filterByRegex(
 const mdLinkTextGenFn = (text: string, uri: string) => `[${text}](${uri})`;
 
 function rjIdNumToStr(id: number) {
-  return id < 1000000 ? `RJ${id}` : `RJ0${id}`;
+  return id < 1000000 ? `RJ${id.toString().padStart(6, '0')}` : `RJ0${id}`;
 }
 
 export default {
