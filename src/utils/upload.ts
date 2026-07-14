@@ -148,7 +148,7 @@ async function getOrCreateUploadTag(client: Octokit, owner: string, repo: string
       assetCount = cached.assetCount;
       logger.trace(`GitHub Release ${tag} current assets count (cached): ${assetCount}`);
 
-      if (assetCount >= 996) {
+      if (assetCount >= 996 && assetCount < 1000) {
         assetCount = await countReleaseAssets(client, owner, repo, release.id);
         tagAssetCountCache.set(tag, { releaseId: release.id, assetCount });
         logger.trace(`GitHub Release ${tag} current assets count (re-fetched): ${assetCount}`);
