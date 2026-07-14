@@ -10,6 +10,20 @@ import logger from './logger.js';
 
 const dbUploadQueue = new PQueue({ concurrency: 1 });
 
+interface TagCacheEntry {
+  releaseId: number;
+  assetCount: number;
+}
+
+const tagAssetCountCache = new Map<string, TagCacheEntry>();
+
+function incrementTagCache(tag: string): void {
+  const entry = tagAssetCountCache.get(tag);
+  if (entry !== undefined) {
+    entry.assetCount++;
+  }
+}
+
 async function uploadOrReplaceAsset(
   client: Octokit,
   owner: string,
@@ -89,6 +103,26 @@ async function uploadOrReplaceAsset(
   return finalUrl;
 }
 
+async function countReleaseAssets(client: Octokit, owner: string, repo: string, releaseId: number): Promise<number> {
+  let assetCount = 0;
+  let page = 1;
+  while (true) {
+    const assets = await client.rest.repos.listReleaseAssets({
+      owner,
+      repo,
+      release_id: releaseId,
+      per_page: 100,
+      page,
+    });
+    assetCount += assets.data.length;
+    if (assets.data.length < 100) {
+      break;
+    }
+    page++;
+  }
+  return assetCount;
+}
+
 async function getOrCreateUploadTag(client: Octokit, owner: string, repo: string): Promise<string> {
   let index = 0;
   while (true) {
@@ -107,31 +141,28 @@ async function getOrCreateUploadTag(client: Octokit, owner: string, repo: string
       return tag;
     }
 
-    // Count the total assets in this release
-    let assetCount = 0;
-    let page = 1;
-    while (true) {
-      const assets = await client.rest.repos.listReleaseAssets({
-        owner,
-        repo,
-        release_id: release.id,
-        per_page: 100,
-        page,
-      });
-      assetCount += assets.data.length;
-      if (assets.data.length < 100) {
-        break;
-      }
-      page++;
-    }
+    const cached = tagAssetCountCache.get(tag);
+    let assetCount: number;
 
-    logger.trace(`GitHub Release ${tag} current assets count: ${assetCount}`);
+    if (cached !== undefined && cached.releaseId === release.id) {
+      assetCount = cached.assetCount;
+      logger.trace(`GitHub Release ${tag} current assets count (cached): ${assetCount}`);
+
+      if (assetCount >= 996) {
+        assetCount = await countReleaseAssets(client, owner, repo, release.id);
+        tagAssetCountCache.set(tag, { releaseId: release.id, assetCount });
+        logger.trace(`GitHub Release ${tag} current assets count (re-fetched): ${assetCount}`);
+      }
+    } else {
+      assetCount = await countReleaseAssets(client, owner, repo, release.id);
+      tagAssetCountCache.set(tag, { releaseId: release.id, assetCount });
+      logger.trace(`GitHub Release ${tag} current assets count: ${assetCount}`);
+    }
 
     if (assetCount < 1000) {
       return tag;
     }
 
-    // If 1000 or more, try the next index
     index++;
   }
 }
@@ -146,6 +177,7 @@ async function uploadChunkFile(
 ): Promise<string> {
   const assetName = `chunk-${chunkUuid}.bin`;
   const url = await githubUtils.uploadAsset(client, owner, repo, tag, assetName, filePath);
+  incrementTagCache(tag);
   return url;
 }
 
