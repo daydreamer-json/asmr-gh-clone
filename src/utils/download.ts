@@ -363,6 +363,26 @@ export async function processWorks(
     }
   }
 
+  // Also collect chunk UUIDs from works DB as a fallback
+  // (covers the case where saveMetadata uploaded works.msgpack.zst but not files.msgpack.zst)
+  const worksPath = path.join(outputDbDir, 'works.msgpack.zst');
+  if (fs.existsSync(worksPath)) {
+    const works = readDbFile<DbWork>(worksPath);
+    for (const work of works) {
+      if (work.files) {
+        for (const wf of work.files) {
+          if (wf.chunks) {
+            for (const chk of wf.chunks) {
+              if (chk.uuid) {
+                validChunkUuids.add(chk.uuid);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // Cleanup pending/incomplete chunk assets on GitHub before doing any download
   await uploadUtils.cleanupPendingAssets(octoClient, owner, repo, validChunkUuids);
 

@@ -233,9 +233,10 @@ async function saveMetadata(outputDbDir: string, works: DbWork[], files: DbFile[
             retries--;
             logger.error(`Error uploading DB asset ${file.name} (Retries left: ${retries}): ${error.message || error}`);
             if (retries === 0) {
-              throw error;
+              logger.error(`Failed to upload DB asset ${file.name}. Local DB is up-to-date; will retry on next run.`);
+            } else {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
             }
-            await new Promise((resolve) => setTimeout(resolve, 2000));
           }
         }
       }
