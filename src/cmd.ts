@@ -110,6 +110,27 @@ async function parseCommand() {
       wrapHandler(cmds.optimizeChunk),
     )
     .command(
+      ['missingDlsiteMetaDl'],
+      'Re-fetch DLsite metadata for works stored as [] in DB and replace them',
+      (yargs) => {
+        yargs.options({
+          'output-db-dir': {
+            // alias: ['o'],
+            desc: 'Output root directory',
+            default: path.resolve('output_db'),
+            normalize: true,
+            type: 'string',
+          },
+          'dry-run': {
+            desc: 'Perform a trial run with no changes made',
+            default: false,
+            type: 'boolean',
+          },
+        });
+      },
+      wrapHandler(cmds.missingDlsiteMetaDl),
+    )
+    .command(
       ['test'],
       'Test command',
       (yargs) => {
@@ -120,6 +141,11 @@ async function parseCommand() {
             default: path.resolve('output_db'),
             normalize: true,
             type: 'string',
+          },
+          'clean-orphans': {
+            desc: 'Remove orphaned chunks (referenced by no work/file) from chunks DB',
+            default: false,
+            type: 'boolean',
           },
         });
       },

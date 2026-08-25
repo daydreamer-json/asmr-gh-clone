@@ -72,10 +72,15 @@ export default async () => {
       const workInfo = await apClient.work.info(id);
       let dlsiteInfo: Record<string, unknown> | null = null;
       try {
-        dlsiteInfo = (await dsClient.work.info(stringUtils.rjIdNumToStr(id))) as Record<string, unknown>;
+        const rsp = await dsClient.work.info(stringUtils.rjIdNumToStr(id));
+        if (Array.isArray(rsp) && rsp.length === 0) {
+          throw new Error('Response is []');
+        } else {
+          dlsiteInfo = rsp as Record<string, unknown>;
+        }
       } catch (error) {
         logger.warn(
-          `Failed to fetch DLsite metadata for ${id}. It might have been deleted from DLsite. Error: ${error}`,
+          `Failed to fetch DLsite metadata for ${id}. It might have been deleted or API down. Error: ${error}`,
         );
       }
       const [main, thumb, icon] = await Promise.all([
@@ -102,7 +107,7 @@ export default async () => {
 
       const rsp = { id, workInfo, dlsiteInfo, coverImage, files: apFileEntry.transformed };
       logger.trace(
-        `Fetched: ${rsp.workInfo.release}, ${rsp.workInfo.create_date}, ${math.formatFileSize(math.arrayTotal(rsp.files.map((e) => e.size)), { ...FORMAT_SIZE_OPTS, unit: 'M' })}, ${id}`,
+        `Fetched: ${rsp.workInfo.release}, ${rsp.workInfo.create_date}, ${id}, ${math.formatFileSize(math.arrayTotal(rsp.files.map((e) => e.size)), { ...FORMAT_SIZE_OPTS, unit: 'M' })}`,
       );
       return rsp;
     }),

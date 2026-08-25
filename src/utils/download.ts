@@ -30,7 +30,7 @@ export interface ProgressReporter {
 class LogProgressReporter implements ProgressReporter {
   private _text: string = '';
   private lastLogTime: number = 0;
-  private readonly logIntervalMs: number = 2000;
+  private readonly logIntervalMs: number = 5000;
 
   constructor(initialText: string) {
     this._text = initialText;

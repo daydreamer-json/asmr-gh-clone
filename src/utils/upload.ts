@@ -269,7 +269,7 @@ async function cleanupPendingAssets(
   }
 
   const relReleases = releases.filter((r) => r.tag_name && r.tag_name.startsWith('rel'));
-  const deleteQueue = new PQueue({ concurrency: 5 });
+  const deleteQueue = new PQueue({ concurrency: 4 });
   let deletedCount = 0;
 
   for (const release of relReleases) {

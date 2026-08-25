@@ -1,5 +1,6 @@
 import path from 'node:path';
 import ky from 'ky';
+import { DateTime } from 'luxon';
 import * as MsgPack from 'msgpackr';
 import type { DbChunk, DbFile, DbWork } from '../types/db.js';
 import argvUtils from '../utils/argv.js';
@@ -29,7 +30,7 @@ export default async () => {
   {
     logger.info('Checking database update ...');
     for (const name of Object.keys(dbFilePath) as Array<keyof typeof dbFilePath>) {
-      const url = `https://github.com/${configAuth.github.owner.main}/${configAuth.github.repo.main}/releases/download/db/${name}.msgpack.zst`;
+      const url = `https://github.com/${configAuth.github.owner.main}/${configAuth.github.repo.main}/releases/download/db/${name}.msgpack.zst?t=${DateTime.now().toMillis()}`;
       try {
         const remoteBuffer = await ky.get(url).arrayBuffer();
         const remoteData = MsgPack.unpack(Bun.zstdDecompressSync(new Uint8Array(remoteBuffer))) as any[];
