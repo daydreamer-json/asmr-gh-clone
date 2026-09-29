@@ -45,9 +45,59 @@ async function parseCommand() {
             normalize: true,
             type: 'string',
           },
+          'skip-cleanup': {
+            desc: 'Skip cleanup of pending/incomplete chunk assets before download',
+            default: false,
+            type: 'boolean',
+          },
+          'cleanup-recent': {
+            desc: 'Number of recent rel tags to clean up in archive (sealed tags are skipped via cache)',
+            default: 2,
+            type: 'number',
+          },
+          'force-refresh': {
+            desc: 'Ignore sealed release cache and re-fetch asset counts from GitHub',
+            default: false,
+            type: 'boolean',
+          },
         });
       },
       wrapHandler(cmds.archive),
+    )
+    .command(
+      ['cleanupOrphans'],
+      'Delete orphaned/incomplete chunk assets from GitHub releases (full scan)',
+      (yargs) => {
+        yargs.options({
+          'output-db-dir': {
+            desc: 'Output root directory',
+            default: path.resolve('output_db'),
+            normalize: true,
+            type: 'string',
+          },
+          'dry-run': {
+            desc: 'List orphaned assets without deleting them',
+            default: false,
+            type: 'boolean',
+          },
+          'force-refresh': {
+            desc: 'Ignore sealed release cache and scan all tags',
+            default: false,
+            type: 'boolean',
+          },
+          recent: {
+            desc: 'Only scan the last N rel tags (ignored when --all is set)',
+            default: 0,
+            type: 'number',
+          },
+          all: {
+            desc: 'Include sealed (full) releases in the scan',
+            default: false,
+            type: 'boolean',
+          },
+        });
+      },
+      wrapHandler(cmds.cleanupOrphans),
     )
     .command(
       ['filterInputWrite <date-start> <date-end>'],

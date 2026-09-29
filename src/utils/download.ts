@@ -328,6 +328,39 @@ export async function getRegisteredFiles(outputDbDir: string): Promise<Map<strin
   return registeredFiles;
 }
 
+export async function collectValidChunkUuids(outputDbDir: string): Promise<Set<string>> {
+  const validChunkUuids = new Set<string>();
+  const registeredFiles = await getRegisteredFiles(outputDbDir);
+  for (const file of registeredFiles.values()) {
+    if (file.chunks) {
+      for (const chunk of file.chunks) {
+        if (chunk.uuid) {
+          validChunkUuids.add(chunk.uuid);
+        }
+      }
+    }
+  }
+
+  const worksPath = path.join(outputDbDir, 'works.msgpack.zst');
+  if (fs.existsSync(worksPath)) {
+    const works = readDbFile<DbWork>(worksPath);
+    for (const work of works) {
+      if (work.files) {
+        for (const wf of work.files) {
+          if (wf.chunks) {
+            for (const chk of wf.chunks) {
+              if (chk.uuid) {
+                validChunkUuids.add(chk.uuid);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return validChunkUuids;
+}
+
 export async function processWorks(
   octoClient: Octokit,
   owner: string,
@@ -351,40 +384,20 @@ export async function processWorks(
   const tasks: FileTask[] = [];
   const registeredFiles = await getRegisteredFiles(outputDbDir);
 
-  // Collect all valid chunk UUIDs from the registered files
-  const validChunkUuids = new Set<string>();
-  for (const file of registeredFiles.values()) {
-    if (file.chunks) {
-      for (const chunk of file.chunks) {
-        if (chunk.uuid) {
-          validChunkUuids.add(chunk.uuid);
-        }
-      }
-    }
-  }
+  const validChunkUuids = await collectValidChunkUuids(outputDbDir);
 
-  // Also collect chunk UUIDs from works DB as a fallback
-  // (covers the case where saveMetadata uploaded works.msgpack.zst but not files.msgpack.zst)
-  const worksPath = path.join(outputDbDir, 'works.msgpack.zst');
-  if (fs.existsSync(worksPath)) {
-    const works = readDbFile<DbWork>(worksPath);
-    for (const work of works) {
-      if (work.files) {
-        for (const wf of work.files) {
-          if (wf.chunks) {
-            for (const chk of wf.chunks) {
-              if (chk.uuid) {
-                validChunkUuids.add(chk.uuid);
-              }
-            }
-          }
-        }
-      }
-    }
+  const argvCleanup = argvUtils.getArgv();
+  const skipCleanup: boolean = argvCleanup['skip-cleanup'] === true;
+  const cleanupRecentCount: number =
+    typeof argvCleanup['cleanup-recent'] === 'number' ? argvCleanup['cleanup-recent'] : 2;
+  const forceRefresh: boolean = argvCleanup['force-refresh'] === true;
+  if (skipCleanup) {
+    logger.info('Skipping cleanup of pending chunk assets (--skip-cleanup).');
+  } else {
+    await uploadUtils.cleanupRecentAssets(octoClient, owner, repo, validChunkUuids, outputDbDir, cleanupRecentCount, {
+      forceRefresh,
+    });
   }
-
-  // Cleanup pending/incomplete chunk assets on GitHub before doing any download
-  await uploadUtils.cleanupPendingAssets(octoClient, owner, repo, validChunkUuids);
 
   for (const item of metadataArray) {
     const pendingFileUuids = new Set<string>();
@@ -526,7 +539,7 @@ export async function processWorks(
       // ignore errors from previous tag resolution to not block future ones
     }
     try {
-      const tag = await uploadUtils.getOrCreateUploadTag(octoClient, owner, repo);
+      const tag = await uploadUtils.getOrCreateUploadTag(octoClient, owner, repo, outputDbDir, { forceRefresh });
       resolveLock(tag);
       return tag;
     } catch (error) {
@@ -622,7 +635,15 @@ export async function processWorks(
         const tag = await getOrCreateUploadTagLocked();
 
         // spinner.text = `Uploading chunk ${chunk.uuid} to release ${tag}...`;
-        const url = await uploadUtils.uploadChunkFile(octoClient, owner, repo, tag, chunk.uuid, chunk.filePath);
+        const url = await uploadUtils.uploadChunkFile(
+          octoClient,
+          owner,
+          repo,
+          tag,
+          chunk.uuid,
+          chunk.filePath,
+          outputDbDir,
+        );
         chunksUploaded.push({ uuid: chunk.uuid, url });
 
         // serialize metadata updates and work commits in metaQueue
@@ -801,5 +822,6 @@ export default {
   downloadFiles,
   getRegisteredWorkIds,
   getRegisteredFiles,
+  collectValidChunkUuids,
   processWorks,
 };
