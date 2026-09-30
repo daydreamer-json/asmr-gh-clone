@@ -708,13 +708,14 @@ export async function processWorks(
       }
 
       // Close current chunk and upload it if the work changes to avoid mixing works in a single chunk
-      if (previousWorkId !== null && previousWorkId !== task.workId) {
-        if (currentChunk !== null) {
+      if (previousWorkId !== task.workId) {
+        if (previousWorkId !== null && currentChunk !== null) {
           logger.info(`Work ID changed from ${previousWorkId} to ${task.workId}. Closing current chunk.`);
           await closeChunk(currentChunk);
           pushUploadTask(currentChunk);
           currentChunk = null;
         }
+        logger.info(`Starting archiving work ${task.workId}...`);
       }
       previousWorkId = task.workId;
 
