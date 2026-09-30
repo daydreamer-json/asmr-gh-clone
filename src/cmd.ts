@@ -60,6 +60,11 @@ async function parseCommand() {
             default: false,
             type: 'boolean',
           },
+          'refresh-metadata': {
+            desc: 'Ignore metadata cache and re-fetch all work metadata from API',
+            default: false,
+            type: 'boolean',
+          },
         });
       },
       wrapHandler(cmds.archive),
