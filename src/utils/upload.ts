@@ -1,10 +1,9 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import { Octokit } from '@octokit/rest';
 import PQueue from 'p-queue';
 import type { DbChunk, DbFile, DbWork } from '../types/db.js';
 import configAuth from './configAuth.js';
-import { readDbFile, writeDbFile } from './db.js';
+import dbClient from './dbClient.js';
 import githubUtils from './github.js';
 import logger from './logger.js';
 import {
@@ -316,35 +315,7 @@ async function saveMetadata(outputDbDir: string, works: DbWork[], files: DbFile[
     fs.mkdirSync(outputDbDir, { recursive: true });
   }
 
-  const worksPath = path.join(outputDbDir, 'works.msgpack.zst');
-  const filesPath = path.join(outputDbDir, 'files.msgpack.zst');
-  const chunksPath = path.join(outputDbDir, 'chunks.msgpack.zst');
-
-  const updatedFiles: { name: string; path: string }[] = [];
-
-  if (works.length > 0) {
-    logger.trace(`Appending ${works.length} entries to ${worksPath}`);
-    const currentWorks = readDbFile<DbWork>(worksPath);
-    currentWorks.push(...works);
-    writeDbFile(worksPath, currentWorks);
-    updatedFiles.push({ name: 'works.msgpack.zst', path: worksPath });
-  }
-
-  if (files.length > 0) {
-    logger.trace(`Appending ${files.length} entries to ${filesPath}`);
-    const currentFiles = readDbFile<DbFile>(filesPath);
-    currentFiles.push(...files);
-    writeDbFile(filesPath, currentFiles);
-    updatedFiles.push({ name: 'files.msgpack.zst', path: filesPath });
-  }
-
-  if (chunks.length > 0) {
-    logger.trace(`Appending ${chunks.length} entries to ${chunksPath}`);
-    const currentChunks = readDbFile<DbChunk>(chunksPath);
-    currentChunks.push(...chunks);
-    writeDbFile(chunksPath, currentChunks);
-    updatedFiles.push({ name: 'chunks.msgpack.zst', path: chunksPath });
-  }
+  const updatedFiles = await dbClient.append(outputDbDir, works, files, chunks);
 
   if (updatedFiles.length > 0) {
     await dbUploadQueue.add(async () => {

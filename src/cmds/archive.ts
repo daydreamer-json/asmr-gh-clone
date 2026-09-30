@@ -52,6 +52,7 @@ export default async () => {
 
   if (idsToProcess.length === 0) {
     logger.info('All target works are already registered in the DB');
+    await download.shutdownDb();
     return;
   }
 

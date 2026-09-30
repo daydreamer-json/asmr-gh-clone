@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import * as MsgPack from 'msgpackr';
 
+export const DB_ZSTD_LEVEL = 3;
+
 /**
  * Reads a zstd-compressed MessagePack database file.
  * Returns an empty array if the file does not exist.
@@ -24,6 +26,20 @@ export function readDbFile<T>(filePath: string): T[] {
  */
 export function writeDbFile<T>(filePath: string, data: T[]): void {
   const packed = MsgPack.pack(data);
-  const compressed = Bun.zstdCompressSync(packed, { level: 16 });
+  const compressed = Bun.zstdCompressSync(packed, { level: DB_ZSTD_LEVEL });
   fs.writeFileSync(filePath, compressed);
+}
+
+export function writeDbFileAtomic<T>(filePath: string, data: T[]): void {
+  const packed = MsgPack.pack(data);
+  const compressed = Bun.zstdCompressSync(packed, { level: DB_ZSTD_LEVEL });
+  const tmpPath = `${filePath}.tmp`;
+  fs.writeFileSync(tmpPath, compressed);
+  const fd = fs.openSync(tmpPath, 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmpPath, filePath);
 }

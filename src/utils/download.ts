@@ -13,7 +13,7 @@ import type { FilesystemEntryTransformed } from '../types/api/audioProviderFiles
 import type { DbFile, DbFileChunk, DbWork } from '../types/db.js';
 import argvUtils from './argv.js';
 import appConfig from './config.js';
-import { readDbFile } from './db.js';
+import dbClient from './dbClient.js';
 import logger from './logger.js';
 import math from './math.js';
 import rateMeterModule from './rateMeter.js';
@@ -301,28 +301,12 @@ export async function downloadFiles(files: FilesystemEntryTransformed[]): Promis
 }
 
 export async function getRegisteredWorkIds(outputDbDir: string): Promise<Set<number>> {
-  const registeredIds = new Set<number>();
-  const worksPath = path.join(outputDbDir, 'works.msgpack.zst');
-  if (!fs.existsSync(worksPath)) {
-    return registeredIds;
-  }
-
-  const works = readDbFile<DbWork>(worksPath);
-  for (const work of works) {
-    if (work && typeof work.id === 'number') {
-      registeredIds.add(work.id);
-    }
-  }
-
-  return registeredIds;
+  return new Set(await dbClient.getWorkIds(outputDbDir));
 }
 
-export async function getRegisteredFiles(outputDbDir: string): Promise<Map<string, DbFile>> {
+export async function getRegisteredFiles(outputDbDir: string, hashes: string[]): Promise<Map<string, DbFile>> {
   const registeredFiles = new Map<string, DbFile>();
-  const filesPath = path.join(outputDbDir, 'files.msgpack.zst');
-  if (!fs.existsSync(filesPath)) return registeredFiles;
-
-  const files = readDbFile<DbFile>(filesPath);
+  const files = await dbClient.getFilesByHashes(outputDbDir, hashes);
   for (const file of files) {
     if (file && typeof file.hash === 'string') {
       registeredFiles.set(file.hash, file);
@@ -332,36 +316,11 @@ export async function getRegisteredFiles(outputDbDir: string): Promise<Map<strin
 }
 
 export async function collectValidChunkUuids(outputDbDir: string): Promise<Set<string>> {
-  const validChunkUuids = new Set<string>();
-  const registeredFiles = await getRegisteredFiles(outputDbDir);
-  for (const file of registeredFiles.values()) {
-    if (file.chunks) {
-      for (const chunk of file.chunks) {
-        if (chunk.uuid) {
-          validChunkUuids.add(chunk.uuid);
-        }
-      }
-    }
-  }
+  return new Set(await dbClient.getValidChunkUuids(outputDbDir));
+}
 
-  const worksPath = path.join(outputDbDir, 'works.msgpack.zst');
-  if (fs.existsSync(worksPath)) {
-    const works = readDbFile<DbWork>(worksPath);
-    for (const work of works) {
-      if (work.files) {
-        for (const wf of work.files) {
-          if (wf.chunks) {
-            for (const chk of wf.chunks) {
-              if (chk.uuid) {
-                validChunkUuids.add(chk.uuid);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  return validChunkUuids;
+export async function shutdownDb(): Promise<void> {
+  await dbClient.shutdown();
 }
 
 export async function processWorks(
@@ -385,7 +344,8 @@ export async function processWorks(
 
   // Create a flat list of all file download tasks, and initialize work status trackers
   const tasks: FileTask[] = [];
-  const registeredFiles = await getRegisteredFiles(outputDbDir);
+  const targetHashes = [...new Set(metadataArray.flatMap((item) => item.files.map((file) => file.hash)))];
+  const registeredFiles = await getRegisteredFiles(outputDbDir, targetHashes);
 
   const validChunkUuids = await collectValidChunkUuids(outputDbDir);
 
@@ -819,6 +779,8 @@ export async function processWorks(
       } catch {}
     }
     throw error;
+  } finally {
+    await shutdownDb();
   }
 }
 
@@ -828,4 +790,5 @@ export default {
   getRegisteredFiles,
   collectValidChunkUuids,
   processWorks,
+  shutdownDb,
 };
