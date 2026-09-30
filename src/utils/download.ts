@@ -146,7 +146,10 @@ async function downloadCore(
       Referer: appConfig.network.api.audioProvider.referer,
     },
     timeout: appConfig.network.timeout,
-    retry: { limit: appConfig.network.retryCount },
+    retry: {
+      limit: appConfig.network.retryCount,
+      statusCodes: [408, 413, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530],
+    },
   });
 
   if (!response.body) {
