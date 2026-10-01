@@ -135,6 +135,8 @@ const FORMAT_SIZE_OPTS = {
   unit: null,
 };
 
+const RETRYABLE_STATUS_CODES = [408, 413, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530];
+
 async function downloadCore(
   file: FilesystemEntryTransformed,
   destPath: string,
@@ -148,7 +150,7 @@ async function downloadCore(
     timeout: appConfig.network.timeout,
     retry: {
       limit: appConfig.network.retryCount,
-      statusCodes: [408, 413, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530],
+      statusCodes: RETRYABLE_STATUS_CODES,
     },
   });
 
@@ -216,6 +218,139 @@ async function downloadCore(
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function getMaxDownloadRetries(): number {
+  const cfg = appConfig.network as { downloadRetryLimit?: unknown; stallRetryLimit?: unknown };
+  if (typeof cfg.downloadRetryLimit === 'number' && cfg.downloadRetryLimit >= 0) {
+    return Math.floor(cfg.downloadRetryLimit);
+  }
+  if (typeof cfg.stallRetryLimit === 'number' && cfg.stallRetryLimit >= 0) {
+    return Math.floor(cfg.stallRetryLimit);
+  }
+  return 5;
+}
+
+export function isRetryableDownloadError(error: any): boolean {
+  if (!error || typeof error !== 'object') {
+    return true;
+  }
+  const code: unknown = error.code ?? error.cause?.code;
+  if (typeof code === 'string') {
+    const nonRetryableCodes = new Set(['ENOSPC', 'EACCES', 'EPERM', 'EROFS', 'ENOENT', 'EISDIR', 'EBADF']);
+    if (nonRetryableCodes.has(code)) {
+      return false;
+    }
+    const retryableCodes = new Set([
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'EPIPE',
+      'ECONNABORTED',
+      'EAI_AGAIN',
+      'ENOTFOUND',
+      'ECONNREFUSED',
+      'EHOSTUNREACH',
+      'ENETRESET',
+      'ENETUNREACH',
+      'EHOSTDOWN',
+    ]);
+    if (retryableCodes.has(code)) {
+      return true;
+    }
+  }
+  const status: unknown = error.response?.status ?? error.cause?.response?.status;
+  if (typeof status === 'number') {
+    if (RETRYABLE_STATUS_CODES.includes(status)) {
+      return true;
+    }
+    if (status >= 400 && status < 500) {
+      return false;
+    }
+    if (status >= 500) {
+      return true;
+    }
+  }
+  if (error.name === 'TimeoutError' || error.name === 'NetworkError' || error.name === 'FetchError') {
+    return true;
+  }
+  if (error.message === 'Download stalled') {
+    return true;
+  }
+  const message = `${error.message ?? ''} ${error.cause?.message ?? ''}`.toLowerCase();
+  if (message.length === 0) {
+    return true;
+  }
+  const nonRetryableSubstrings = ['enospc', 'no space left', 'permission denied', 'read-only', 'eacces', 'eperm'];
+  if (nonRetryableSubstrings.some((s) => message.includes(s))) {
+    return false;
+  }
+  const retryableSubstrings = [
+    'socket',
+    'econnreset',
+    'econnaborted',
+    'etimedout',
+    'eai_again',
+    'enotfound',
+    'epipe',
+    'enetreset',
+    'enetunreach',
+    'ehostunreach',
+    'fetch failed',
+    'fetchfailed',
+    'network',
+    'terminated',
+    'hang up',
+    'closed unexpectedly',
+    'connection closed',
+    'connection reset',
+    'timed out',
+    'timeout',
+    'aborted',
+    'reset',
+  ];
+  if (retryableSubstrings.some((s) => message.includes(s))) {
+    return true;
+  }
+  return true;
+}
+
+async function downloadWithRetry(
+  file: FilesystemEntryTransformed,
+  destPath: string,
+  onProgress: (delta: number) => void,
+): Promise<DownloadResult> {
+  const maxRetries = getMaxDownloadRetries();
+  let attempt = 0;
+  while (true) {
+    let downloadedInThisAttempt = 0;
+    try {
+      return await downloadCore(file, destPath, (delta) => {
+        downloadedInThisAttempt += delta;
+        onProgress(delta);
+      });
+    } catch (error: any) {
+      if (!isRetryableDownloadError(error) || attempt >= maxRetries) {
+        throw error;
+      }
+      attempt++;
+      const detail = error?.code ?? error?.message ?? String(error);
+      logger.warn(`Download failed for ${file.uuid} (${detail}). Retrying (${attempt}/${maxRetries})...`);
+      if (downloadedInThisAttempt !== 0) {
+        onProgress(-downloadedInThisAttempt);
+      }
+      if (fs.existsSync(destPath)) {
+        try {
+          fs.unlinkSync(destPath);
+        } catch {}
+      }
+      const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 30000);
+      await sleep(backoffMs);
+    }
+  }
+}
+
 export async function downloadFiles(files: FilesystemEntryTransformed[]): Promise<DownloadResult[]> {
   const argv = argvUtils.getArgv();
   const outputDir: string = argv['output-dir'];
@@ -254,38 +389,16 @@ export async function downloadFiles(files: FilesystemEntryTransformed[]): Promis
   const downloadTasks = files.map((file, index) => {
     return queue.add(async () => {
       const destPath = path.join(outputDir, `${file.uuid}.bin`);
-      let attempt = 0;
-      while (true) {
-        let downloadedInThisAttempt = 0;
-        try {
-          const res = await downloadCore(file, destPath, (delta) => {
-            downloadedInThisAttempt += delta;
-            downloadedBytes += delta;
-            downloadMeter.increment(delta);
-            updateProgress();
-          });
-          completedCount += 1;
-          updateProgress();
-          results[index] = res;
-          break;
-        } catch (error: any) {
-          if (error.message === 'Download stalled' && attempt < appConfig.network.stallRetryLimit) {
-            attempt++;
-            logger.warn(
-              `Download stalled for ${file.uuid}. Retrying (${attempt}/${appConfig.network.stallRetryLimit})...`,
-            );
-            downloadedBytes -= downloadedInThisAttempt;
-            updateProgress();
-            if (fs.existsSync(destPath)) {
-              try {
-                fs.unlinkSync(destPath);
-              } catch {}
-            }
-            continue;
-          }
-          throw error;
+      const res = await downloadWithRetry(file, destPath, (delta) => {
+        downloadedBytes += delta;
+        if (delta > 0) {
+          downloadMeter.increment(delta);
         }
-      }
+        updateProgress();
+      });
+      completedCount += 1;
+      updateProgress();
+      results[index] = res;
     });
   });
 
@@ -431,32 +544,7 @@ export async function processWorks(
     destPath: string,
     onProgress: (bytes: number) => void,
   ): Promise<DownloadResult> => {
-    let attempt = 0;
-    while (true) {
-      let downloadedInThisAttempt = 0;
-      try {
-        const res = await downloadCore(file, destPath, (delta) => {
-          downloadedInThisAttempt += delta;
-          onProgress(delta);
-        });
-        return res;
-      } catch (error: any) {
-        if (error.message === 'Download stalled' && attempt < appConfig.network.stallRetryLimit) {
-          attempt++;
-          logger.warn(
-            `Download stalled for ${file.uuid}. Retrying (${attempt}/${appConfig.network.stallRetryLimit})...`,
-          );
-          onProgress(-downloadedInThisAttempt);
-          if (fs.existsSync(destPath)) {
-            try {
-              fs.unlinkSync(destPath);
-            } catch {}
-          }
-          continue;
-        }
-        throw error;
-      }
-    }
+    return downloadWithRetry(file, destPath, onProgress);
   };
 
   const WINDOW_SIZE = Math.max(Math.floor(appConfig.threadCount.networkDownload * 1.5), 8);

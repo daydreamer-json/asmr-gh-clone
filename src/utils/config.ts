@@ -39,7 +39,8 @@ type ConfigType = AllRequired<
       retryCount: number; // Number of retries for access failure
       stallThresholdBytesPerSec: number; // Minimum download speed to not be considered stalled
       stallTimeoutSeconds: number; // Seconds of low speed/no data before stall is declared
-      stallRetryLimit: number; // Maximum retry count for stall recovery
+      stallRetryLimit: number; // Maximum retry count for stall recovery (deprecated, fallback when downloadRetryLimit is missing)
+      downloadRetryLimit: number; // Maximum retry count for download failure (stall and network errors)
     };
     threadCount: {
       // Upper limit on the number of threads for parallel processing
@@ -101,6 +102,7 @@ const initialConfig: ConfigType = {
     stallThresholdBytesPerSec: 10240,
     stallTimeoutSeconds: 15,
     stallRetryLimit: 3,
+    downloadRetryLimit: 5,
   },
   threadCount: { networkDownload: 8, networkUpload: 4, networkMetadata: 8, hashing: 8 },
   rateLimit: {
