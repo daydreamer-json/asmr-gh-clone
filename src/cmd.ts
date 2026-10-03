@@ -166,7 +166,7 @@ async function parseCommand() {
     )
     .command(
       ['missingDlsiteMetaDl'],
-      'Re-fetch DLsite metadata for works stored as [] in DB and replace them',
+      'Re-fetch DLsite metadata for works with missing (null/[]) dlsiteInfo and replace them',
       (yargs) => {
         yargs.options({
           'output-db-dir': {
