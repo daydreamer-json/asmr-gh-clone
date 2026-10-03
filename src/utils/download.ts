@@ -683,7 +683,24 @@ export async function processWorks(
 
     uploadQueue.add(async () => {
       try {
-        const tag = await getOrCreateUploadTagLocked();
+        const maxTagRetries = uploadUtils.getMaxUploadRetries();
+        let tag: string | null = null;
+        let tagAttempt = 0;
+        while (tag === null) {
+          try {
+            tag = await getOrCreateUploadTagLocked();
+          } catch (error: any) {
+            if (!uploadUtils.isRetryableUploadError(error) || tagAttempt >= maxTagRetries) {
+              throw error;
+            }
+            tagAttempt++;
+            const detail = error?.status ?? error?.code ?? error?.message ?? String(error);
+            logger.warn(
+              `Failed to resolve upload tag for chunk ${chunk.uuid} (${detail}). Retrying (${tagAttempt}/${maxTagRetries})...`,
+            );
+            await sleep(Math.min(1000 * 2 ** (tagAttempt - 1), 30000) + Math.floor(Math.random() * 1000));
+          }
+        }
 
         // spinner.text = `Uploading chunk ${chunk.uuid} to release ${tag}...`;
         const url = await uploadUtils.uploadChunkFile(

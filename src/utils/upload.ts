@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { Octokit } from '@octokit/rest';
 import PQueue from 'p-queue';
 import type { DbChunk, DbFile, DbWork } from '../types/db.js';
+import appConfig from './config.js';
 import configAuth from './configAuth.js';
 import dbClient from './dbClient.js';
 import githubUtils from './github.js';
@@ -16,6 +17,132 @@ import {
 } from './releaseCache.js';
 
 const dbUploadQueue = new PQueue({ concurrency: 1 });
+
+const RETRYABLE_UPLOAD_STATUS_CODES = [408, 413, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function getMaxUploadRetries(): number {
+  const cfg = appConfig.network as { uploadRetryLimit?: unknown; downloadRetryLimit?: unknown };
+  if (typeof cfg.uploadRetryLimit === 'number' && cfg.uploadRetryLimit >= 0) {
+    return Math.floor(cfg.uploadRetryLimit);
+  }
+  if (typeof cfg.downloadRetryLimit === 'number' && cfg.downloadRetryLimit >= 0) {
+    return Math.floor(cfg.downloadRetryLimit);
+  }
+  return 5;
+}
+
+export function isRetryableUploadError(error: any): boolean {
+  if (!error || typeof error !== 'object') {
+    return true;
+  }
+  const code: unknown = error.code ?? error.cause?.code;
+  if (typeof code === 'string') {
+    const nonRetryableCodes = new Set(['ENOSPC', 'EACCES', 'EPERM', 'EROFS', 'ENOENT', 'EISDIR', 'EBADF']);
+    if (nonRetryableCodes.has(code)) {
+      return false;
+    }
+    const retryableCodes = new Set([
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'EPIPE',
+      'ECONNABORTED',
+      'EAI_AGAIN',
+      'ENOTFOUND',
+      'ECONNREFUSED',
+      'EHOSTUNREACH',
+      'ENETRESET',
+      'ENETUNREACH',
+      'EHOSTDOWN',
+    ]);
+    if (retryableCodes.has(code)) {
+      return true;
+    }
+  }
+  const status: unknown =
+    error.status ?? error.response?.status ?? error.cause?.status ?? error.cause?.response?.status;
+  if (typeof status === 'number') {
+    if (RETRYABLE_UPLOAD_STATUS_CODES.includes(status)) {
+      return true;
+    }
+    if (status >= 400 && status < 500) {
+      return false;
+    }
+    if (status >= 500) {
+      return true;
+    }
+  }
+  if (error.name === 'TimeoutError' || error.name === 'NetworkError' || error.name === 'FetchError') {
+    return true;
+  }
+  const message = `${error.message ?? ''} ${error.cause?.message ?? ''}`.toLowerCase();
+  if (message.length === 0) {
+    return true;
+  }
+  const nonRetryableSubstrings = ['enospc', 'no space left', 'permission denied', 'read-only', 'eacces', 'eperm'];
+  if (nonRetryableSubstrings.some((s) => message.includes(s))) {
+    return false;
+  }
+  const retryableSubstrings = [
+    'socket',
+    'econnreset',
+    'econnaborted',
+    'etimedout',
+    'eai_again',
+    'enotfound',
+    'epipe',
+    'enetreset',
+    'enetunreach',
+    'ehostunreach',
+    'fetch failed',
+    'fetchfailed',
+    'network',
+    'terminated',
+    'hang up',
+    'closed unexpectedly',
+    'connection closed',
+    'connection reset',
+    'timed out',
+    'timeout',
+    'inactivity',
+    'body timed out',
+    'aborted',
+    'reset',
+  ];
+  if (retryableSubstrings.some((s) => message.includes(s))) {
+    return true;
+  }
+  return true;
+}
+
+async function uploadAssetWithRetry(
+  client: Octokit,
+  owner: string,
+  repo: string,
+  tag: string,
+  targetFileName: string,
+  filePath: string,
+): Promise<string> {
+  const maxRetries = getMaxUploadRetries();
+  let attempt = 0;
+  while (true) {
+    try {
+      return await githubUtils.uploadAsset(client, owner, repo, tag, targetFileName, filePath);
+    } catch (error: any) {
+      if (!isRetryableUploadError(error) || attempt >= maxRetries) {
+        throw error;
+      }
+      attempt++;
+      const detail = error?.status ?? error?.code ?? error?.message ?? String(error);
+      logger.warn(`Upload failed for ${targetFileName} (${detail}). Retrying (${attempt}/${maxRetries})...`);
+      const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 30000) + Math.floor(Math.random() * 1000);
+      await sleep(backoffMs);
+    }
+  }
+}
 
 interface TagCacheEntry {
   releaseId: number;
@@ -112,7 +239,7 @@ async function uploadOrReplaceAsset(
   }
 
   logger.info(`Uploading DB asset "${targetFileName}" as temp asset "${tempFileName}" to release "${tag}"...`);
-  const tempUrl = await githubUtils.uploadAsset(client, owner, repo, tag, tempFileName, filePath);
+  const tempUrl = await uploadAssetWithRetry(client, owner, repo, tag, tempFileName, filePath);
 
   let updatedRelease: any = null;
   let uploadedTempAsset: any = undefined;
@@ -234,7 +361,7 @@ async function getOrCreateUploadTag(
 
     const cached = tagAssetCountCache.get(tag);
     if (cached !== undefined && cached.sealed && !forceRefresh) {
-      logger.trace(`GitHub Release ${tag} skipped (sealed cache)`);
+      // logger.trace(`GitHub Release ${tag} skipped (sealed cache)`);
       index++;
       continue;
     }
@@ -305,7 +432,7 @@ async function uploadChunkFile(
   outputDbDir?: string,
 ): Promise<string> {
   const assetName = `chunk-${chunkUuid}.bin`;
-  const url = await githubUtils.uploadAsset(client, owner, repo, tag, assetName, filePath);
+  const url = await uploadAssetWithRetry(client, owner, repo, tag, assetName, filePath);
   incrementTagCache(tag, outputDbDir);
   return url;
 }
@@ -545,4 +672,6 @@ export default {
   cleanupPendingAssets,
   cleanupRecentAssets,
   listRelTagNames,
+  getMaxUploadRetries,
+  isRetryableUploadError,
 };

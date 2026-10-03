@@ -19,18 +19,22 @@ async function uploadAsset(
   const fileStream = fs.createReadStream(filePath);
 
   logger.info(`Mirror archive: Uploading to ${tag}, ${targetFileName} (${fileSize} bytes) ...`);
-  const response = await client.rest.repos.uploadReleaseAsset({
-    owner,
-    repo,
-    release_id: releaseId,
-    name: targetFileName,
-    data: fileStream as unknown as string, // Octokit internal handles ReadStream via string/buffer types
-    headers: {
-      'content-type': 'application/octet-stream',
-      'content-length': fileSize,
-    },
-  });
-  return response.data.browser_download_url;
+  try {
+    const response = await client.rest.repos.uploadReleaseAsset({
+      owner,
+      repo,
+      release_id: releaseId,
+      name: targetFileName,
+      data: fileStream as unknown as string,
+      headers: {
+        'content-type': 'application/octet-stream',
+        'content-length': fileSize,
+      },
+    });
+    return response.data.browser_download_url;
+  } finally {
+    fileStream.destroy();
+  }
 }
 
 async function getReleaseInfo(client: Octokit, owner: string, repo: string, tag: string) {
